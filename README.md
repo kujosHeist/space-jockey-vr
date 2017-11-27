@@ -1,1 +1,4 @@
-Visualising Satellite Footprints
+VR app from satellites pov
+
+Hosted on glitch:
+https://space-cowboys-sat-view.glitch.me/
