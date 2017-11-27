@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<!-- Use correct character set. -->
+	<meta charset="utf-8">
+	<!-- Tell IE to use the latest, best version (or Chrome Frame if pre-IE11). -->
+	<meta http-equiv="X-UA-Compatible" content="IE=Edge,chrome=1">
+	<!-- Make the application on mobile take up the full browser screen and disable user scaling. -->
+	<meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+	<title>Cesium Sensor Volumes Example</title>
+
+	<link rel="stylesheet" href="widgets.css" />
+	<!-- <script src="Cesium.js"></script> -->
+	<script src="https://cesiumjs.org/releases/1.39/Build/Cesium/Cesium.js"></script>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+	<script src="cesium-sensor-volumes.js"></script>
+
+	<style>
+		#cesiumContainer {
+			position: absolute;
+			top: 0;
+			left: 0;
+			height: 100%;
+			width: 100%;
+			margin: 0;
+			overflow: hidden;
+			padding: 0;
+			font-family: sans-serif;
+		}
+
+		html {
+			height: 100%;
+		}
+
+		body {
+			padding: 0;
+			margin: 0;
+			overflow: hidden;
+			height: 100%;
+		}
+
+		#toolbar {
+			margin: 5px;
+			padding: 2px 5px;
+			position: absolute;
+		}
+	</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<div id="toolbar"></div>
+<script>
+
+	// create globe
+	var viewer = new Cesium.Viewer('cesiumContainer', {
+		vrButton : true
+	});
+
+	$("button.cesium-button.cesium-vrButton").trigger('click');
+	var trackingEntity = true;
+
+	// store default camera settings
+	var camera = viewer.scene.camera;
+	var originalDestination = camera._position.clone()
+	var originalHeading =  camera.heading;
+	var originalPitch = camera.pitch;
+	var originalRoll = camera.roll;	
+
+	//viewer.clock._multiplier = 120;
+  
+  	// add data source
+  	var dataSrc = Cesium.CzmlDataSource.load("data.czml");
+	viewer.dataSources.add(dataSrc);
+
+	// draw point
+	var longitude = -6.0;
+	var latitude = 53.0;
+	//drawPoint(longitude, latitude);
+
+
+	function resetView(){
+		viewer.trackedEntity = null;	
+		viewer.scene.camera.flyTo({  
+		destination : 
+		originalDestination,
+			orientation: {
+			  heading : originalHeading,
+			  pitch : originalPitch,
+			  roll : originalRoll
+			}
+		});			
+	}
+
+
+	function drawSensor(){
+
+		if(currentSatellite == "TERRA" || currentSatellite == "AQUA"){
+			halfAngle = 55.0;
+		}else{
+			halfAngle = 30.0;
+		}
+		var czmlSatId = "Satellite/" + currentSatellite;
+
+		var ec = viewer.dataSources._dataSources[0]._entityCollection;
+		var sat = ec.getById(czmlSatId);	
+
+		var cartesian = sat.position.getValue(viewer.clock.currentTime);
+		var cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+
+
+		var longitude = cartographic.longitude;
+		var latitude = cartographic.latitude;
+		var altitude = cartographic.height;
+		drawCesiumSensor(longitude, latitude, altitude, halfAngle);
+
+		console.log("Calling sensor with satellite: " + czmlSatId);
+	}
+
+	var primitiveCollection = [];
+	
+	function drawCesiumSensor(longitude, latitude, altitude, halfAngle){
+		var clockAngle = Cesium.Math.toRadians(0.0); // direction of sensior, 0.0 is north, 90.0 east, etc. 
+		var cone = Cesium.Math.toRadians(0.0); // viewing angle of sensor, 0.0 is nadir, roatation around y axis
+		var twist = Cesium.Math.toRadians(0.0);  // viewing angle of sensor, 0.0 is nadir, roatation around x axis	
+		
+		function getModelMatrix() {
+			var ellipsoid = viewer.scene.globe.ellipsoid;
+			var location = ellipsoid.cartographicToCartesian(new Cesium.Cartographic(longitude, latitude, altitude));
+			
+/*
+			var entity = viewer.entities.add({
+				position: location,
+				point: {
+					pixelSize: 4,
+					color : Cesium.Color.RED
+				}
+			});
+				*/
+			var modelMatrix = Cesium.Transforms.northEastDownToFixedFrame(location);
+			var orientation = Cesium.Matrix3.multiply(
+				Cesium.Matrix3.multiply(Cesium.Matrix3.fromRotationZ(clockAngle), Cesium.Matrix3.fromRotationY(cone), new Cesium.Matrix3()),
+				Cesium.Matrix3.fromRotationX(twist), new Cesium.Matrix3()
+			);
+			return Cesium.Matrix4.multiply(modelMatrix, Cesium.Matrix4.fromRotationTranslation(orientation, Cesium.Cartesian3.ZERO), new Cesium.Matrix4());
+		}	
+
+		function addRectangularSensor(halfAngle) {
+			//viewer.scene.primitives.removeAll();
+			var rectangularPyramidSensor = new CesiumSensorVolumes.RectangularPyramidSensorVolume();
+
+			rectangularPyramidSensor.modelMatrix = getModelMatrix();
+			rectangularPyramidSensor.radius = 20000000.0;
+			rectangularPyramidSensor.xHalfAngle = Cesium.Math.toRadians(halfAngle);
+			rectangularPyramidSensor.yHalfAngle = Cesium.Math.toRadians(halfAngle);
+
+			rectangularPyramidSensor.lateralSurfaceMaterial = Cesium.Material.fromType('Color');
+			rectangularPyramidSensor.lateralSurfaceMaterial.uniforms.color = new Cesium.Color(0.0, 1.0, 1.0, 0.5);
+			if(primitiveCollection.length > 10){
+
+				primitiveCollection[primitiveIndex].destroy();
+				primitiveIndex++;
+
+				
+			}
+			viewer.scene.primitives.add(rectangularPyramidSensor);
+
+			primitiveCollection.push(rectangularPyramidSensor);
+
+
+			
+		}
+		addRectangularSensor(halfAngle);
+
+
+	}
+	primitiveIndex = 0;
+
+	function drawPoint(longitude, latitude){
+	    viewer.entities.add({
+	      position : Cesium.Cartesian3.fromDegrees(longitude, latitude),
+	      point : {
+	        pixelSize : 3,
+	        color : Cesium.Color.YELLOW
+	      }
+	    });	 
+	}
+
+	function addToolbarButton(id, text, onclick) {
+		var button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'cesium-button';
+		button.onclick = onclick;
+		button.textContent = text;
+
+		
+			
+		
+		button.id = id;	
+		
+		
+		document.getElementById('toolbar').appendChild(button);
+	}
+
+	addToolbarButton('vr-button', 'VR', function(){
+		$("button.cesium-button.cesium-vrButton").trigger('click');
+	})
+
+/*	function addInfo(text) {
+		var button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'cesium-button';
+		button.id = 'satellite-name';
+		button.textContent = text;
+
+	
+		document.getElementById('toolbar').appendChild(button);
+	}	*/
+
+	function updateInfo(id, text){
+		document.getElementById(id).textContent = text;
+	}
+
+
+	var interval = null;
+
+	function changeSat(){
+		console.log("Changing satellite")
+		currentSatellite = satelliteList[satelliteIndex];
+		var czmlSatId = "Satellite/" + currentSatellite;
+
+		var ec = viewer.dataSources._dataSources[0]._entityCollection;
+		var sat = ec.getById(czmlSatId);
+				
+
+		if(satelliteIndex < satelliteList.length-1){
+			satelliteIndex++;
+		}else{
+			satelliteIndex = 0;
+		}
+
+		if(trackingEntity){
+			viewer.trackedEntity = sat;	
+		}
+
+		updateInfo("satellite-name", "Current Satellite: " + currentSatellite);
+
+		clearInterval(interval);
+		interval = setInterval(function(){
+			if(showSensorFlag){
+				drawSensor();	
+			}
+			
+		}, 1000);
+
+	}
+
+	
+
+	function trackEntity(){
+
+		if(trackingEntity){
+			trackingEntity = false;
+			updateInfo("switch-view", "Fly With Satellite")
+			resetView()
+		}else{
+			trackingEntity = true;
+			var czmlSatId = "Satellite/" + currentSatellite;
+
+			var ec = viewer.dataSources._dataSources[0]._entityCollection;
+			var sat = ec.getById(czmlSatId);
+			updateInfo("switch-view", "Show Globe")
+			viewer.trackedEntity = sat;	
+		}	
+	}
+
+	setTimeout(changeSat, 1000);
+
+	//addToolbarButton('Draw Sensor', drawSensor);	
+	addToolbarButton("satellite-name", "Current Satellite: ISS (ZARYA)", changeSat);
+	//addToolbarButton('Reset View', resetView);
+	if(trackingEntity){
+		addToolbarButton('switch-view', 'Show Globe', trackEntity);	
+	}else{
+		addToolbarButton('switch-view', 'Fly With Satellite', trackEntity);
+	}
+
+	var showSensorFlag = false;
+	addToolbarButton('show-footprint', 'Sensor', function(){
+		if(showSensorFlag){
+			showSensorFlag = false;
+		}else{
+			showSensorFlag = true;
+		}
+	})
+	
+
+
+	var satelliteIndex = 0;
+	var satelliteList = ["ISS (ZARYA)", "LANDSAT 7", "AQUA", "AURA", "TERRA", "CALIPSO", "LANDSAT 8", "EO-1", "SMAP", "SUOMI NPP"]	
+
+	var currentSatellite;
+
+
+    var e = viewer.entities.add({ 
+        position : Cesium.Cartesian3.fromDegrees(147.6992,-18.2871),
+        billboard :{
+            image : 'https://cdn.glitch.com/af5cfffd-4abd-4d1c-87fa-8d4df0d5966f%2Fgreat_reef_changes.jpg?1493561789930',
+            width : 80, // default: undefined
+            height : 50, // default: undefined            
+            text: "Hellow"
+        },
+        description: "Great Barrier Reef Changes"
+
+
+    });	
+
+    var e = viewer.entities.add({ 
+        position : Cesium.Cartesian3.fromDegrees(-144.0606,85.8256),
+        billboard :{
+            image : 'https://cdn.glitch.com/af5cfffd-4abd-4d1c-87fa-8d4df0d5966f%2Farctic_circle_effects.jpg?1493561794753',
+            width : 80, // default: undefined
+            height : 50, // default: undefined            
+            text: "Hellow"
+        },
+        description: "Arctic Circle Changes"
+    });	   
+
+    viewer.entities.add({
+        position : Cesium.Cartesian3.fromDegrees(9.6570, 46.8876),
+        billboard :{
+            image : 'https://cdn.glitch.com/af5cfffd-4abd-4d1c-87fa-8d4df0d5966f%2Fthe_alps_changes.jpg?1493561789441',
+            width : 80, // default: undefined
+            height : 50, // default: undefined            
+            text: "Hellow"
+        },
+        description: "The Alps Changes"
+    });
+
+    
+
+
+
+	//addInfo("satellite-name", "Current Satellite: ISS (ZARYA)")
+
+	
+</script>
+</body>
+</html>
